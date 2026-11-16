@@ -473,7 +473,7 @@ function resize() {
   const sInt = Math.floor(sRaw + 1e-6), sHalf = Math.floor(sRaw * 2 + 1e-6) / 2;
   let rs = 1;
   if (sInt >= 1 && sInt / sRaw >= 0.88) S = sInt;
-  else if (sHalf >= 0.5 && sHalf / sRaw >= 0.88) S = sHalf;
+  else if (sHalf >= 0.5 && sHalf / sRaw >= 0.85) S = sHalf;
   else { S = Math.max(0.5, Math.ceil(sRaw * 2 - 1e-6) / 2); rs = S / sRaw; }
   dpr = dprBase * rs;
   canvas.width = Math.round(cssW * dpr);
@@ -1127,14 +1127,17 @@ const themeOf = p => (D.hell ? HELL_THEMES[p.theme] : null) || THEMES[p.theme];
    from: 몇 번째 기둥부터, chance: 기둥 사이마다 등장 확률, minReach: 이보다 낮은 불기둥은 만들지 않음 */
 const HELL_JETS = { enabled: true, from: 4, chance: 0.6, margin: 58, minSpace: 150, minReach: 90, halfW: 16 };
 let jets = [], lastAmp = 0, lastSway = 0, lastDeathBy = '';
+const JET_ST = [{ warn: 0, lvl: 0 }, { warn: 0, lvl: 0 }];      // 재사용 (바닥용 / 천장용)
 function jetState(j, ceil) {
-  if (j.mode === 'perm') return { warn: 1, lvl: 0.9 + 0.1 * Math.sin(tick * 0.11 + j.ph + (ceil ? 2 : 0)) };
+  const o = JET_ST[ceil ? 1 : 0];
+  if (j.mode === 'perm') { o.warn = 1; o.lvl = 0.9 + 0.1 * Math.sin(tick * 0.11 + j.ph + (ceil ? 2 : 0)); return o; }
   // burst: 쉼 → 예고 45프레임 → 분출 70프레임. twin의 천장 쪽은 반 박자 어긋난다.
   const t = (tick + j.ph + (ceil && j.type === 'twin' ? j.per / 2 : 0)) % j.per, e0 = j.per - 70;
-  if (t < e0 - 45) return { warn: 0, lvl: 0 };
-  if (t < e0) return { warn: (t - (e0 - 45)) / 45, lvl: 0 };
+  if (t < e0 - 45) { o.warn = 0; o.lvl = 0; return o; }
+  if (t < e0) { o.warn = (t - (e0 - 45)) / 45; o.lvl = 0; return o; }
   const e = (t - e0) / 70;
-  return { warn: 1, lvl: e < 0.1 ? e / 0.1 : e > 0.85 ? (1 - e) / 0.15 : 0.94 + 0.06 * Math.sin(tick * 0.4) };
+  o.warn = 1; o.lvl = e < 0.1 ? e / 0.1 : e > 0.85 ? (1 - e) / 0.15 : 0.94 + 0.06 * Math.sin(tick * 0.4);
+  return o;
 }
 const THEMES = {
   green:  { main: '#e0b83a', hi: '#fff0a0', hi2: '#f2d264', sh: '#b08a22', dk: '#7d6014' },   // (키 이름만 green, 실제 색은 앰버)
@@ -2550,7 +2553,7 @@ function drawMovingPipeLights(camX) {
     const pulse = strength * (0.86 + 0.14 * Math.sin(tick * 0.22 + p.ph));
     const lamps = [top - 13, bottom + 13];
     // Unselected sources retain their bright core but never run broad Bloom.
-    const lampBloomPasses = localLightSources.some(s => s.p === p) ? bloomPasses : 1;
+    const lampBloomPasses = !D.hell && localLightSources.some(s => s.p === p) ? bloomPasses : 1;
     const lowCost = lampBloomPasses < 3;
 
     // Keep the direct luminous lens in LOW, but avoid the expensive
@@ -2647,7 +2650,8 @@ function buildLocalLights(camX, heroY = hero.y) {
     candidates.push({ p, x:x+p.w*0.5, y:top+3, lensY:top-13, dir:1, rgb:rgbCol, energy, top, bot });
     candidates.push({ p, x:x+p.w*0.5, y:bot-3, lensY:bot+13, dir:-1, rgb:rgbCol, energy, top, bot });
   }
-  const maxLights = GRAPHICS_TIERS[effectiveGraphics].maxLights;
+  // HELL·ABYSS는 화면 전체가 이미 빛나고 움직이는 기둥이 대부분이라, 넓게 번지는 조명은 가장 가까운 2개로 제한한다
+  const maxLights = Math.min(GRAPHICS_TIERS[effectiveGraphics].maxLights, D.hell ? 2 : 99);
   // Sort once per frame: prefer lights with visible, nearby hero interaction.
   candidates.sort((a,b) => (Math.abs(a.x-heroX)+0.65*Math.abs(a.y-heroY)) -
     (Math.abs(b.x-heroX)+0.65*Math.abs(b.y-heroY)));
@@ -2703,7 +2707,7 @@ function localLampGradient(s,alpha=1) {
 // Soft light in the open corridor: the solid pipes are drawn over this pass.
 // Keep it intentionally weak to preserve the crisp pixel-art gameplay silhouettes.
 function drawLocalLightHaze() {
-  if (!localLightEnabled || quality>=3 || fogF>0.88) return;
+  if (!localLightEnabled || quality>=3 || fogF>0.88 || D.hell) return;      // 지옥 테마에서는 대기 번짐 생략 (전체 화면급 합성)
   ctx.save();ctx.globalCompositeOperation='screen';
   for (const s of localLightSources) {
     if (s.x < -130 || s.x>VW+130) continue;
@@ -3024,13 +3028,13 @@ function drawGroundGlow(lt, camX) {
   ctx.restore();
 }
 
-function flameColumn(cx, base, dir, h, seed) {
+const FLAME_LAYERS = [['#3a0604', 31, 1.0], ['#a3130a', 27, 0.985], ['#ff4a10', 21, 0.94], ['#ffa22e', 14, 0.86], ['#ffe98a', 8, 0.72], ['#ffffff', 3, 0.5]];
+const FLAME_W = 104, FLAME_PAD = 84;      // 버퍼 폭(유닛) / 불꽃 끝 너머 연기·불티용 여유
+function paintFlame(g, cx, base, dir, h, seed) {
   // 도트 불기둥. 굵은 몸통이 높이의 대부분을 유지하다 끝에서 갈라지며, 겹마다 다른 박자로 요동친다.
-  if (h < 6) return;
-  const layers = [['#3a0604', 31, 1.0], ['#a3130a', 27, 0.985], ['#ff4a10', 21, 0.94], ['#ffa22e', 14, 0.86], ['#ffe98a', 8, 0.72], ['#ffffff', 3, 0.5]];
-  for (let li = 0; li < layers.length; li++) {
-    const col = layers[li][0], hw = layers[li][1], hh = h * layers[li][2];
-    ctx.fillStyle = col;
+  for (let li = 0; li < FLAME_LAYERS.length; li++) {
+    const hw = FLAME_LAYERS[li][1], hh = h * FLAME_LAYERS[li][2];
+    g.fillStyle = FLAME_LAYERS[li][0];
     for (let d = 0; d < hh; d += 4) {
       const t = d / hh;
       const prof = t < 0.08 ? 1.25 - t * 3.1 : 1 - Math.pow(t, 3.2);                       // 밑동은 넓게, 끝만 가늘게
@@ -3038,32 +3042,50 @@ function flameColumn(cx, base, dir, h, seed) {
       const ww = hw * prof * lick;
       if (ww < 1) continue;
       const wob = Math.sin(tick * 0.33 - d * 0.07 + seed) * (2 + 5 * t) + Math.sin(tick * 0.9 + d * 0.23 + li) * 1.5;
-      ctx.fillRect(Math.round(cx - ww + wob), dir < 0 ? base - d - 4 : base + d, Math.round(ww * 2), 4);
+      g.fillRect(Math.round((cx - ww + wob) / 2) * 2, dir < 0 ? base - d - 4 : base + d, Math.round(ww) * 2, 4);
     }
   }
   // 옆으로 튀어나오는 불꽃 혀
   for (let k = 0; k < 6; k++) {
     const d = ((tick * 3.1 + k * 71 + seed * 40) % Math.max(40, h * 0.9)), t = d / h, side = k & 1 ? 1 : -1;
     const ox = side * (20 + 8 * Math.sin(tick * 0.5 + k)) * (1 - t * 0.5), yy = dir < 0 ? base - d : base + d;
-    ctx.fillStyle = k % 3 ? '#ff6a1a' : '#ffd27a';
-    ctx.fillRect(Math.round(cx + ox - 3), yy - 6, 6, 10); ctx.fillRect(Math.round(cx + ox * 1.25 - 2), yy - (dir < 0 ? 12 : -4), 4, 6);
+    g.fillStyle = k % 3 ? '#ff6a1a' : '#ffd27a';
+    g.fillRect(Math.round(cx + ox - 3), yy - 6, 6, 10); g.fillRect(Math.round(cx + ox * 1.25 - 2), yy - (dir < 0 ? 12 : -4), 4, 6);
   }
   // 끝에서 피어오르는 검은 연기와 불티
   const tip = dir < 0 ? base - h : base + h;
   for (let k = 0; k < 5; k++) {
     const a = (tick * 1.6 + k * 37 + seed * 20) % 60, sx2 = cx + Math.sin(k * 2.3 + tick * 0.06) * (10 + a * 0.3);
-    ctx.globalAlpha = 0.5 * (1 - a / 60);
-    ctx.fillStyle = '#1a0a0a'; ctx.fillRect(Math.round(sx2 - 6), tip + (dir < 0 ? -a : a) - 5, 12, 10);
-    ctx.globalAlpha = 1 - a / 60;
-    ctx.fillStyle = '#ffd27a'; ctx.fillRect(Math.round(cx + Math.sin(k * 1.7 + tick * 0.21) * (16 + a * 0.5)), tip + (dir < 0 ? -a * 1.4 : a * 1.4), 2, 2);
+    g.globalAlpha = 0.5 * (1 - a / 60);
+    g.fillStyle = '#1a0a0a'; g.fillRect(Math.round(sx2 - 6), tip + (dir < 0 ? -a : a) - 5, 12, 10);
+    g.globalAlpha = 1 - a / 60;
+    g.fillStyle = '#ffd27a'; g.fillRect(Math.round(cx + Math.sin(k * 1.7 + tick * 0.21) * (16 + a * 0.5)), tip + (dir < 0 ? -a * 1.4 : a * 1.4), 2, 2);
   }
-  ctx.globalAlpha = 1;
-  // 빛: 기둥 전체의 번짐 + 주변을 물들이는 넓은 붉은 빛
+  g.globalAlpha = 1;
+}
+/* 성능: 불기둥 하나는 사각형 수백 개다. 매 프레임 화면에 직접 그리는 대신, 불기둥마다 작은 버퍼(절반 해상도 =
+   도트 한 칸)에 2틱마다 한 번만 그리고 화면에는 그 버퍼 한 장을 붙인다. 모양은 같고 그리는 양은 크게 줄어든다. */
+function flameColumn(j, ceil, cx, base, dir, h, reach, seed) {
+  if (h < 6) return;
+  const key = ceil ? 'fcC' : 'fcF', H = Math.ceil((reach + FLAME_PAD) / 2) * 2;
+  let c = j[key];
+  if (!c || c.cv.height !== H / 2) {
+    const [cv, g] = makeCanvas(FLAME_W / 2, H / 2);
+    c = j[key] = { cv, g, t: -9 };
+  }
+  if (tick - c.t >= 2 || tick < c.t) {
+    c.t = tick;
+    c.g.setTransform(0.5, 0, 0, 0.5, 0, 0);
+    c.g.clearRect(0, 0, FLAME_W, H);
+    paintFlame(c.g, FLAME_W / 2, dir < 0 ? H : 0, dir, h, seed);
+  }
+  ctx.drawImage(c.cv, cx - FLAME_W / 2, dir < 0 ? base - H : base, FLAME_W, H);
+  // 빛: 기둥 전체의 번짐 (+ HIGH에서만 주변을 물들이는 넓은 붉은 빛)
   ctx.save();
   ctx.globalCompositeOperation = 'lighter'; ctx.imageSmoothingEnabled = true;
   const gy = dir < 0 ? base - h - 30 : base - 30;
   ctx.globalAlpha = 0.75; ctx.drawImage(glowSprite('#ff6a1a'), cx - 70, gy, 140, h + 60);
-  ctx.globalAlpha = 0.28; ctx.drawImage(glowSprite('#ff2a0a'), cx - 150, gy - 20, 300, h + 100);
+  if (GRAPHICS_TIERS[effectiveGraphics].bloom >= 3) { ctx.globalAlpha = 0.28; ctx.drawImage(glowSprite('#ff2a0a'), cx - 150, gy - 20, 300, h + 100); }
   ctx.restore();
   ctx.imageSmoothingEnabled = false;
 }
@@ -3076,10 +3098,10 @@ function drawJets(camX) {
       if (ceil ? j.type === 'floor' : j.type === 'ceil') continue;
       const st = jetState(j, ceil), dir = ceil ? 1 : -1;
       const reach = ceil ? j.top : PLAY_H - j.bot, vb = ceil ? 0 : PLAY_H, seed = j.ph + (ceil ? 3 : 0);
-      if (st.lvl > 0) flameColumn(x, vb, dir, reach * st.lvl, seed);
+      if (st.lvl > 0) flameColumn(j, ceil, x, vb, dir, reach * st.lvl, reach, seed);
       else if (st.warn > 0) {
         // 예고: 화구가 끓어오르며 불꽃이 점점 커지고 불티가 높이 튄다
-        flameColumn(x, vb, dir, 18 + 34 * st.warn + 6 * Math.sin(tick * 0.7), seed);
+        flameColumn(j, ceil, x, vb, dir, 18 + 34 * st.warn + 6 * Math.sin(tick * 0.7), reach, seed);
         ctx.fillStyle = '#ffd27a'; ctx.globalAlpha = 0.5 + 0.5 * st.warn;
         for (let i = 0; i < 7; i++) {
           const d = (tick * 3 + i * 29) % (50 + (reach - 50) * st.warn);
@@ -4198,8 +4220,9 @@ function render(alpha) {
   let ox = 0, oy = 0;
   if (shake > 0) { ox = (Math.random() - 0.5) * shake; oy = (Math.random() - 0.5) * shake; }
   if (quake > 0.02 && !paused) {       // 화염 구역: 묵직한 흔들림(느린 파동) + 잔떨림
-    ox += Math.sin(tick * 1.9) * quake * 2.4 + (Math.random() - 0.5) * quake * 4.5;
-    oy += Math.sin(tick * 2.7 + 1) * quake * 3.2 + (Math.random() - 0.5) * quake * 5.5;
+    const q = quake * (D.chaos ? 0.7 : 1), ft = tick + alpha;      // 프레임 보간 시간으로 부드럽게
+    ox += (Math.sin(ft * 0.95) * 2.6 + Math.sin(ft * 2.3 + 2) * 1.2) * q;
+    oy += (Math.sin(ft * 1.35 + 1) * 3.4 + Math.sin(ft * 2.9) * 1.4) * q;
   }
   const WYd = Math.round(HUD.top * dpr);       // 게임 영역은 HUD 띠 아래에서 시작
   ctx.setTransform(S, 0, 0, S, Math.round(ox * S), Math.round(oy * S) + WYd);
