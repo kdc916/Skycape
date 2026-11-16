@@ -113,8 +113,6 @@
       top: 0;
       display: block;
       touch-action: none;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
     }
     /* 노치/홈 인디케이터 영역 측정용 */
     #safe {
@@ -442,6 +440,12 @@ function adHeightFor(w, h) {
   if (w >= 728 && h >= 700) return AD_SLOT.tablet;
   return w > h * 1.25 ? AD_SLOT.landscape : AD_SLOT.phone;
 }
+// 배율을 기기 픽셀 격자에 맞춰 내림: 손실이 12% 이내면 정수, 아니면 0.5 단위
+function snapDevice(d) {
+  const f = Math.floor(d + 1e-6);
+  return f >= 1 && f / d >= 0.88 ? f : Math.max(0.5, Math.floor(d * 2 + 1e-6) / 2);
+}
+const snapScale = v => snapDevice(v * S) / S;      // UI 배율(유닛 기준)을 같은 격자에 맞춘다
 function resize() {
   const cs = getComputedStyle(safeEl);
   const sT = parseFloat(cs.paddingTop) || 0, sR = parseFloat(cs.paddingRight) || 0;
@@ -456,16 +460,30 @@ function resize() {
   cssH = Math.max(1, fullH - adTotal);
   const wide = cssW > cssH * 1.25 && cssH <= 700;
   HUD.px = wide ? 40 : clamp(Math.round(cssH * 0.062), 52, 72);        // 태블릿에서는 띠도 함께 커진다
-  HUD.notch = sT; HUD.top = sT + HUD.px; HUD.btn = Math.round(HUD.px * 0.66);
-  dpr = clamp(window.devicePixelRatio || 1, 1, DPR_CAPS[quality]);
-  canvas.style.width = cssW + 'px';
-  canvas.style.height = cssH + 'px';
+  HUD.notch = sT; HUD.top = sT + HUD.px;
+
+  /* 선명도 유지 규칙 (그리드/줄무늬 방지)
+     게임 1유닛이 캔버스 픽셀의 정수(안 되면 0.5 단위) 배가 되어야 맞닿은 도트 사이에 틈이 생기지 않는다.
+     1) 배율을 조금(12% 이내) 줄여서 맞출 수 있으면 그렇게 하고, 캔버스 픽셀을 화면의 기기 픽셀과 1:1로 맞춘다.
+     2) 그보다 많이 줄여야 하면(125%·150% 배율 PC 등) 반대로 한 단계 큰 배율로 그린 뒤 화면에 맞춰 부드럽게 축소한다.
+        크기는 그대로이고, 격자 대신 아주 약한 부드러움만 남는다. */
+  const dprBase = clamp(window.devicePixelRatio || 1, 1, DPR_CAPS[quality]);
+  const playH = Math.max(1, cssH - HUD.top);
+  const sRaw = Math.min(playH / MIN_H, cssW / MIN_W) * dprBase;
+  const sInt = Math.floor(sRaw + 1e-6), sHalf = Math.floor(sRaw * 2 + 1e-6) / 2;
+  let rs = 1;
+  if (sInt >= 1 && sInt / sRaw >= 0.88) S = sInt;
+  else if (sHalf >= 0.5 && sHalf / sRaw >= 0.88) S = sHalf;
+  else { S = Math.max(0.5, Math.ceil(sRaw * 2 - 1e-6) / 2); rs = S / sRaw; }
+  dpr = dprBase * rs;
   canvas.width = Math.round(cssW * dpr);
   canvas.height = Math.round(cssH * dpr);
-
-  const playH = Math.max(1, cssH - HUD.top);
-  scale = Math.min(playH / MIN_H, cssW / MIN_W);
-  S = scale * dpr;
+  const exact = rs === 1 && Math.abs(dprBase - (window.devicePixelRatio || 1)) < 0.001;
+  canvas.style.width = (exact ? canvas.width / dpr : cssW) + 'px';
+  canvas.style.height = (exact ? canvas.height / dpr : cssH) + 'px';
+  canvas.style.imageRendering = exact ? 'pixelated' : 'auto';
+  scale = S / dpr;
+  HUD.btn = snapDevice(HUD.px * 0.66 * dpr / 30) * 30 / dpr;      // 버튼 아이콘(30칸)도 격자에 맞게
   VW = cssW / scale;
   VH = playH / scale;
   groundH = VH - PLAY_H;
@@ -480,7 +498,8 @@ function resize() {
   landscapeUI = wide;
   ui = clamp((landscapeUI ? 1.0 : 0.8) / scale, 1, landscapeUI ? 2 : 1.5);
   // 난이도 4개 버튼이 노치/안전 영역 밖으로 밀려나지 않도록 폭 제한.
-  ui = Math.min(ui, Math.max(0.78, (VW - safe.l - safe.r - 10) / 287));
+  ui = Math.min(ui, Math.max(0.78, (VW - safe.l - safe.r - 10) / 292));
+  ui = snapScale(ui);
   ctx.imageSmoothingEnabled = false;
   visualDirty = raysDirty = true;
   heroRayCache = null;
@@ -704,6 +723,7 @@ for (const p of PALS) { p.skyRGB = p.sky.map(hex); p.cloudRGB = hex(p.cloud); p.
 
 /* 하루 = tod 0→1.  낮(0) → 노을(0.30) → 밤(0.42~0.72) → 새벽(0.85) → 낮(1) */
 const TIMELINE = [[0, 0], [0.17, 0], [0.30, 1], [0.42, 2], [0.72, 2], [0.85, 3], [1, 0]];
+const ABYSS_TIMELINE = [[0, 6], [0.3, 6], [0.5, 5], [0.68, 6], [1, 6]];                          // ABYSS: 해가 뜨지 않는 심연
 const HELL_TIMELINE = [[0, 4], [0.2, 4], [0.34, 5], [0.45, 6], [0.72, 6], [0.86, 5], [1, 4]];   // HELL: 불지옥 → 잿빛 → 심연 → 잿빛 → 불지옥
 const DAY_LEN = 10500;                 // 하루가 지나는 데 필요한 비행 거리 (약 40점)
 const smooth = t => t * t * (3 - 2 * t);
@@ -983,7 +1003,7 @@ function moonLight(T) {
 function computeEnv() {
   const T = tod - Math.floor(tod);
   let i = 0;
-  const hell = D.id === 'hell', TL = hell ? HELL_TIMELINE : TIMELINE;
+  const hell = !!D.hell, TL = D.id === 'abyss' ? ABYSS_TIMELINE : hell ? HELL_TIMELINE : TIMELINE;
   while (i < TL.length - 2 && T >= TL[i + 1][0]) i++;
   const [t0, a] = TL[i], [t1, b] = TL[i + 1];
   const f = a === b ? 0 : smooth(clamp((T - t0) / (t1 - t0), 0, 1));
@@ -1037,13 +1057,18 @@ const DIFFS = [
   { id: 'easy',   name: 'EASY',   col: '#7be06a', gap0: 204, gap1: 144, sp0: 2.28, sp1: 3.18, ramp: 46, moveFrom: 22, moveP: 0.24, amp: 18, variety: 0.85, fog: false },
   { id: 'normal', name: 'NORMAL', col: '#ffd23f', gap0: 188, gap1: 126, sp0: 2.45, sp1: 3.5,  ramp: 38, moveFrom: 14, moveP: 0.32, amp: 22, variety: 1,    fog: false },
   { id: 'hard',   name: 'HARD',   col: '#ff9a3d', gap0: 176, gap1: 116, sp0: 2.6,  sp1: 3.75, ramp: 32, moveFrom: 10, moveP: 0.38, amp: 24, variety: 1,    fog: true },
-  { id: 'hell',   name: 'HELL',   col: '#ff4d5e', gap0: 158, gap1: 104, sp0: 2.9,  sp1: 4.25, ramp: 20, moveFrom: 4,  moveP: 0.4,  amp: 26, variety: 1,    fog: true }
+  { id: 'hell',   name: 'HELL',   col: '#ff4d5e', gap0: 158, gap1: 104, sp0: 2.9,  sp1: 4.25, ramp: 20, moveFrom: 4,  moveP: 0.4,  amp: 26, variety: 1,    fog: true, hell: true },
+  /* ABYSS(극악): 10번째 기둥까지는 HELL과 똑같고, 그 뒤로 기둥을 하나 넘을 때마다 위험도가 2.5%씩 오른다.
+     위험도는 속도·틈·움직임·불기둥에 나뉘어 반영되고(rage 함수들), 기둥들이 제멋대로 움직이기 시작한다(chaos). */
+  { id: 'abyss',  name: 'ABYSS',  col: '#b060ff', gap0: 158, gap1: 104, sp0: 2.9,  sp1: 4.25, ramp: 20, moveFrom: 4,  moveP: 0.4,  amp: 26, variety: 1,    fog: true, hell: true,
+    rage: { from: 10, rate: 0.025 }, chaos: true }
 ];
 // Keep procedural reachable-gap estimates consistent with the selected skin's physics.
 const skinFlightSpeed = (n) => speedFor(n) * activeSkin.speed;
 const skinGravity = () => GRAVITY * activeSkin.gravity;
 const skinFlapV = () => FLAP_V * activeSkin.jump;
 const skinMaxFall = () => MAX_FALL * activeSkin.fall;
+const rageAt = n => D.rage ? D.rage.rate * Math.max(0, n - D.rage.from) : 0;      // 0.025 = +2.5%
 const MIN_GAP = 100;                    // 어떤 경우에도 이보다 좁아지지 않는다 (물리적 한계 보호)
 let diffIdx = 1;
 try { const v = DIFFS.findIndex(d => d.id === localStorage.getItem('flappy_hero_diff2')); if (v >= 0) diffIdx = v; } catch (e) {}
@@ -1072,12 +1097,15 @@ function shapeAt(n) {
 const trendAt = n => Math.min(1, n / D.ramp);
 const baseAt = n => 0.35 + 0.65 * trendAt(n);                       // 기준선: 처음부터 리듬이 느껴지도록 0.35에서 출발
 const tensionAt = n => baseAt(n) * shapeAt(n);                      // 0(가장 쉬움) ~ 1(기준선 최고) ~ 1.3(클라이맥스)
-const speedFor = n => D.sp0 + (D.sp1 - D.sp0) * trendAt(n) * (0.8 + 0.2 * Math.min(1, shapeAt(n)));
+const speedFor = n => (D.sp0 + (D.sp1 - D.sp0) * trendAt(n) * (0.8 + 0.2 * Math.min(1, shapeAt(n)))) * (1 + Math.min(0.6, rageAt(n) * 0.5));
 function gapFor(n) {
   const intro = n < 4 ? (4 - n) * 6 : 0;                                    // 처음 몇 개는 더 넓게
-  return Math.max(MIN_GAP, Math.round(D.gap0 - (D.gap0 - D.gap1) * tensionAt(n) + intro));
+  const g = Math.round(D.gap0 - (D.gap0 - D.gap1) * tensionAt(n) + intro);
+  if (D.rage) return Math.max(ABYSS_MIN_GAP, Math.round(g * (1 - Math.min(0.22, rageAt(n) * 0.22))));
+  return Math.max(MIN_GAP, g);
 }
-const spacingFor = n => 236 + 34 * trendAt(n);
+const ABYSS_MIN_GAP = 94;
+const spacingFor = n => (236 + 34 * trendAt(n)) * (1 - Math.min(0.12, rageAt(n) * 0.12));
 /* 안개 구간 (HARD·HELL 전용 기믹)
    밤마다 한 번, 안개 낀 지역을 지난다. 모든 것이 검은 실루엣이 되고 달빛 빛줄기와 그림자로만 길을 읽어야 한다.
    첫 밤은 기둥 4개, 이후 밤마다 1개씩 길어진다. 대신 구간 안에서는 틈이 조금 넓고 움직이는 기둥이 없다. */
@@ -1090,7 +1118,7 @@ const HELL_THEMES = {
   crimson: { main: '#e0203a', hi: '#ff9aa6', hi2: '#f25a6a', sh: '#8f0f24', dk: '#560814' },   // 피
   steel:   { main: '#b060ff', hi: '#ecd0ff', hi2: '#cf98ff', sh: '#6a2cb8', dk: '#3f1877' }    // 저주 (움직이는 기둥)
 };
-const themeOf = p => (D.id === 'hell' ? HELL_THEMES[p.theme] : null) || THEMES[p.theme];
+const themeOf = p => (D.hell ? HELL_THEMES[p.theme] : null) || THEMES[p.theme];
 /* 불기둥: 기둥과 기둥 사이에서 용암 바닥·천장으로부터 솟는 화염 장애물.
    - perm(상시): 꺼지지 않고 타오르며 숨 쉬듯 일렁인다. 바닥형 / 천장형 / 위아래가 맞물린 화염문(twin).
    - burst(분출): 예고(화구가 끓어오름) 뒤 순식간에 같은 높이까지 치솟았다가 꺼진다.
@@ -1098,7 +1126,7 @@ const themeOf = p => (D.id === 'hell' ? HELL_THEMES[p.theme] : null) || THEMES[p
    화면 절반 이상을 덮고, 경로가 낮으면 천장에서 그만큼 내려온다. 경로 자체는 항상 열려 있어 피할 수 있다.
    from: 몇 번째 기둥부터, chance: 기둥 사이마다 등장 확률, minReach: 이보다 낮은 불기둥은 만들지 않음 */
 const HELL_JETS = { enabled: true, from: 4, chance: 0.6, margin: 58, minSpace: 150, minReach: 90, halfW: 16 };
-let jets = [], lastAmp = 0, lastDeathBy = '';
+let jets = [], lastAmp = 0, lastSway = 0, lastDeathBy = '';
 function jetState(j, ceil) {
   if (j.mode === 'perm') return { warn: 1, lvl: 0.9 + 0.1 * Math.sin(tick * 0.11 + j.ph + (ceil ? 2 : 0)) };
   // burst: 쉼 → 예고 45프레임 → 분출 70프레임. twin의 천장 쪽은 반 박자 어긋난다.
@@ -1129,12 +1157,12 @@ let newBest = false;
 let stylePoints = 0, combo = 0, maxCombo = 0, perfectCount = 0, nearCount = 0;
 let passToast = null;
 const passRings = [];
-const styleBests = { easy: 0, normal: 0, hard: 0, hell: 0 };
+const styleBests = { easy: 0, normal: 0, hard: 0, hell: 0, abyss: 0 };
 try {
   for (const d of DIFFS) styleBests[d.id] = clamp(parseInt(localStorage.getItem('flappy_hero_style_best_v1_' + d.id), 10) || 0, 0, 999999999);
 } catch (e) {}
 
-const bests = { easy: 0, normal: 0, hard: 0, hell: 0 };       // 난이도별 최고 기록
+const bests = { easy: 0, normal: 0, hard: 0, hell: 0, abyss: 0 };       // 난이도별 최고 기록
 try {
   for (const d of DIFFS) bests[d.id] = clamp(parseInt(localStorage.getItem('flappy_hero_best2_' + d.id), 10) || 0, 0, 999999999);   // 난이도 기준이 바뀌어 기록 키를 새로 쓴다
 } catch (e) {}
@@ -1470,7 +1498,7 @@ function resetGame() {
   if (tod - Math.floor(tod) > 0.01) todFF = true;
   fog = null; fogCount = 0; fogDay = -1;
   revivesUsed = 0; reviveHold = false; reviveNote = '';
-  jets = []; lastAmp = 0; lastDeathBy = '';
+  jets = []; lastAmp = 0; lastSway = 0; lastDeathBy = '';
 }
 
 /* 장애물 패턴
@@ -1488,7 +1516,7 @@ function resetGame() {
 const PLAIN = ['green', 'copper', 'aqua', 'crimson'];
 const PATTERNS = [['rand', 3], ['stairs', 2], ['zigzag', 2], ['tunnel', 1.5],
   ['leap', 1.3], ['wide', 1.3], ['pair', 1.3], ['wave', 1.25], ['pulse', 0.9]];
-const SPECIAL_START = { easy: 12, normal: 10, hard: 8, hell: 6 };
+const SPECIAL_START = { easy: 12, normal: 10, hard: 8, hell: 6, abyss: 6 };
 /* P4.3 — HELL REACTOR TRIAL. Score milestones are 1-based; obstacles are 0-based.
    22/23/24 -> 25, ... , 97/98/99 -> 100.
    A safe approach gate at 21/46/71/96 and two recovery pipes after each set.
@@ -1559,7 +1587,7 @@ function spawnPipe() {
   const relief = bossApproachAt(n) || bossRecoveryAt(n);
 
   // 틈 크기: 난이도 곡선 + 기둥마다 약간의 편차
-  let gap = Math.max(gapFor(n) + Math.round(rnd(-4, 10)), MIN_GAP);
+  let gap = Math.max(gapFor(n) + Math.round(rnd(-4, 10)), D.rage ? ABYSS_MIN_GAP : MIN_GAP);
   let sm = rnd(0.9, 1.2), w = PIPE_W, pulseAmp = 0;
   switch (pat.type) {
     case 'stairs': sm = 0.86; break;
@@ -1570,7 +1598,7 @@ function spawnPipe() {
     case 'pair':   w = W_THIN; sm = first ? 1.08 : 0.6; break;
     case 'wave':   sm = 1.04; gap += 6; break;
     case 'pulse':
-      sm = 1.14; pulseAmp = D.id === 'hell' ? 16 : D.id === 'hard' ? 14 : 12;
+      sm = 1.14; pulseAmp = D.hell ? 16 : D.id === 'hard' ? 14 : 12;
       gap = Math.max(138, gap + 24); // even at full contraction at least 122 units
       break;
     case 'boss': {
@@ -1589,17 +1617,35 @@ function spawnPipe() {
   const wx = n === 0 ? dist + FIRST_PIPE : lastWX + spacing;
   const inFog = !bossGate && fog && n >= fog.firstN && n <= fog.lastN;
   if (inFog) { gap += FOG_GAP_BONUS; pulseAmp = 0; }
-  const moving = !inFog && !relief && w === PIPE_W &&
+  let moving = !inFog && !relief && w === PIPE_W &&
     ((bossGate && bossIndex===1) ||
     (!bossGate && (pat.type === 'rand' || pat.type === 'leap') && shapeAt(n) > 0.5 && n >= D.moveFrom && Math.random() < D.moveP * 1.6));
-  const amp = bossGate && bossIndex === 1 ? 10 : moving ? D.amp * rnd(0.7, 1.15) : 0;
-  if (moving) gap = Math.max(gap, Math.round(110 + amp));          // 움직이는 기둥은 흔들리는 만큼 여유를 둔다
+  let amp = bossGate && bossIndex === 1 ? 10 : moving ? D.amp * rnd(0.7, 1.15) : 0;
+  /* ABYSS 혼돈: 위험도가 오를수록 더 많은 기둥이 제멋대로 움직인다.
+       wander: 두 박자가 섞여 불규칙하게 오르내림 / hop: 잠깐 멈췄다가 다른 높이로 훌쩍 옮겨 감 / sway: 좌우로 흔들림
+     움직이는 속도에는 상한이 있어(세로 초당 약 130유닛) 보고 따라갈 수 있다. */
+  const rage = rageAt(n);
+  let chaos = null, sway = 0, spMul = 1, hopPer = 0;
+  // 바짝 붙은 쌍기둥·터널과 맥박형 틈에는 혼돈을 겹치지 않는다 (서로 따로 움직이면 지나갈 길이 닫힐 수 있다)
+  const chaosOk = pat.type !== 'pair' && pat.type !== 'tunnel' && pat.type !== 'pulse' && !pulseAmp;
+  if (D.chaos && chaosOk && n >= D.rage.from && !inFog && !relief && !bossGate && Math.random() < Math.min(0.9, 0.35 + rage * 0.5)) {
+    const r = Math.random();
+    chaos = r < 0.34 ? 'wander' : r < 0.62 ? 'hop' : r < 0.8 ? 'sway' : 'wander';
+    if (chaos !== 'sway') {
+      moving = true;
+      amp = Math.min(40, Math.max(amp, D.amp * rnd(0.75, 1.1)) * (1 + Math.min(0.5, rage * 0.5)));
+      spMul = 1 + Math.min(0.8, rage);
+      hopPer = Math.max(58, Math.round(amp * 2 / (0.45 * 2.1)));
+    }
+    if (chaos === 'sway' || r >= 0.8) sway = Math.min(26, rnd(10, 17) * (1 + Math.min(0.5, rage * 0.5)));
+  }
+  if (moving) gap = Math.max(gap, Math.round((D.rage ? 104 : 110) + amp));          // 움직이는 기둥은 흔들리는 만큼 여유를 둔다
 
   // 이전 틈에서 물리적으로 여유 있게 도달할 수 있는 범위 안에서만 다음 틈을 놓는다
   // P4.2: use the faster of adjacent speeds and subtract both horizontal hitboxes.
   // This is a conservative planning window, not an assertion that every trajectory is playable.
   const speedBound = Math.max(skinFlightSpeed(n), skinFlightSpeed(Math.max(0,n-1)));
-  const travel = Math.max(1, (spacing - lastW - HIT_HW * 2) / speedBound);
+  const travel = Math.max(1, (spacing - lastW - HIT_HW * 2 - sway - lastSway) / speedBound);
   const minGap = gap - pulseAmp;
   const maxD = n < 3 ? 80 : Math.min(travel * 1.65, 180);
   let lo = PIPE_MARGIN + minGap / 2 + amp;
@@ -1638,7 +1684,8 @@ function spawnPipe() {
   c = clamp(c, lo, hi);
 
   pipes.push({
-    n, wx, w, c, gap, pulseAmp, amp, sp: rnd(0.03, 0.055), ph: Math.random() * 6.28,
+    n, wx, wx0: wx, w, c, gap, pulseAmp, amp, sp: Math.min(rnd(0.03, 0.055) * spMul, amp ? 2.15 / amp : 1), ph: Math.random() * 6.28,
+    chaos, hopPer, sway, swSp: rnd(0.035, 0.055), swPh: Math.random() * 6.28,
     pt: pat.type, boss: bossGate ? {milestone:bossTarget, gate:bossIndex + 1} : null,
     relief, dc: Math.round(c - lastC), tr: Math.round(travel),
     theme: moving ? 'steel' : (pat.theme || PLAIN[Math.floor(Math.random() * PLAIN.length)]),
@@ -1648,9 +1695,9 @@ function spawnPipe() {
   });
   if (fog && n === fog.lastN) fog.end = wx + w + 50;
   // HELL: 이전 기둥과 이번 기둥 사이에 화염 분출구
-  if (D.id === 'hell' && HELL_JETS.enabled && n >= HELL_JETS.from && !bossGate && !relief && !inFog &&
-      !(fog && n - 1 >= fog.firstN && n - 1 <= fog.lastN) && Math.random() < HELL_JETS.chance) {
-    const space = wx - (lastWX + lastW);
+  if (D.hell && HELL_JETS.enabled && n >= HELL_JETS.from && !bossGate && !relief && !inFog &&
+      !(fog && n - 1 >= fog.firstN && n - 1 <= fog.lastN) && Math.random() < HELL_JETS.chance + Math.min(0.25, rage * 0.25)) {
+    const space = wx - (lastWX + lastW) - sway - lastSway;
     if (space >= HELL_JETS.minSpace) {
       const top = Math.min(lastC - lastAmp, c - amp) - HELL_JETS.margin;       // 천장 불기둥이 내려오는 끝
       const bot = Math.max(lastC + lastAmp, c + amp) + HELL_JETS.margin;       // 바닥 불기둥이 올라오는 끝
@@ -1666,9 +1713,19 @@ function spawnPipe() {
       }
     }
   }
-  lastWX = wx; lastC = c; lastW = w; lastGap = gap - pulseAmp; lastAmp = amp;
+  lastWX = wx; lastC = c; lastW = w; lastGap = gap - pulseAmp; lastAmp = amp; lastSway = sway;
 }
-const pipeCenter = p => p.amp ? p.c + Math.sin(tick * p.sp + p.ph) * p.amp : p.c;
+const hopVal = (n, k) => { const v = Math.sin(n * 127.1 + k * 311.7) * 43758.5453; return (v - Math.floor(v)) * 2 - 1; };
+function pipeCenter(p) {
+  if (!p.amp) return p.c;
+  if (p.chaos === 'wander') return p.c + p.amp * (0.62 * Math.sin(tick * p.sp + p.ph) + 0.38 * Math.sin(tick * p.sp * 2.37 + p.ph * 1.7));
+  if (p.chaos === 'hop') {
+    const tt = tick + Math.floor(p.ph * 20), k = Math.floor(tt / p.hopPer), f = (tt % p.hopPer) / p.hopPer;
+    const a = hopVal(p.n, k - 1), b = hopVal(p.n, k);
+    return p.c + p.amp * (a + (b - a) * (f < 0.45 ? smooth(f / 0.45) : 1));
+  }
+  return p.c + Math.sin(tick * p.sp + p.ph) * p.amp;
+}
 
 const fogAt = d => !fog ? 0 :
   smooth(clamp((d - (fog.start - FOG_RAMP)) / FOG_RAMP, 0, 1)) * (1 - smooth(clamp((d - fog.end) / FOG_RAMP, 0, 1)));
@@ -1921,6 +1978,7 @@ function step() {
     hero.y = PLAY_H * 0.45 + Math.sin(tick * 0.08) * 7;
     hero.rot = Math.sin(tick * 0.08 + 1.2) * 0.06;
   } else if (state === 'PLAYING') {
+    for (const p of pipes) if (p.sway && !p.passed) p.wx = p.wx0 + Math.sin(tick * p.swSp + p.swPh) * p.sway;      // ABYSS: 좌우로 흔들리는 기둥
     runFrames++;
     // 비행 시간은 1초 단위로 메모리에만 쌓는다. 큰 진행 데이터의 디스크 쓰기는 비행 중에 하지 않고
     // 일시정지·앱 전환·사망 때 한다(끊김 방지). 스타일 최고 기록만 작은 값이라 바로 쓴다.
@@ -2096,7 +2154,7 @@ const FOG_BASE = 'rgb(13,18,38)', FOG_HAZE = 'rgb(44,56,94)';
 // 레이어 사이에 낀 안개: 옅은 연무 + 달빛에 빛나는 안개(빛줄기 버퍼)를 한 겹 덮는다.
 // 뒤에 있는 레이어일수록 여러 겹이 쌓여 흐려지므로 거리감이 생긴다.
 function fogVeil(haze, glow) {
-  ctx.globalAlpha = fogF * haze; ctx.fillStyle = D.id === 'hell' ? 'rgb(96,30,22)' : FOG_HAZE;
+  ctx.globalAlpha = fogF * haze; ctx.fillStyle = D.hell ? 'rgb(96,30,22)' : FOG_HAZE;
   ctx.fillRect(0, 0, VW, PLAY_H);
   ctx.globalAlpha = 1;
   compositeRays(fogF * glow);
@@ -2123,7 +2181,7 @@ function drawSky(sx, env) {
     }
     ctx.globalAlpha = 1;
   }
-  if (F > 0.001) { ctx.globalAlpha = F * 0.94; ctx.fillStyle = D.id === 'hell' ? 'rgb(26,6,8)' : FOG_BASE; ctx.fillRect(0, 0, VW, PLAY_H); ctx.globalAlpha = 1; }
+  if (F > 0.001) { ctx.globalAlpha = F * 0.94; ctx.fillStyle = D.hell ? 'rgb(26,6,8)' : FOG_BASE; ctx.fillRect(0, 0, VW, PLAY_H); ctx.globalAlpha = 1; }
   // 해와 달
   for (const lt of [env.moon, env.sun]) {
     if (!lt.vis || lt.y - lt.r * 5 > PLAY_H) continue;
@@ -3063,7 +3121,7 @@ function drawLavaGround(sx, tintCol, tintA) {
   ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = hg; ctx.fillRect(0, y - 110, VW, 110); ctx.restore();
 }
 function drawGround(sx, tintCol, tintA) {
-  if (D.id === 'hell') { drawLavaGround(sx, tintCol, tintA); return; }
+  if (D.hell) { drawLavaGround(sx, tintCol, tintA); return; }
   // 바닥: 도시 위를 가로지르는 고가 데크(차선 + 경고등 + 트러스 구조물)
   const y = PLAY_H, m = (v, n) => ((v % n) + n) % n;
   const off = m(sx, DIRT_W * 2);
@@ -3363,6 +3421,12 @@ function text(str, x, y, size, fill, opt) {
     if (opt.shadow !== false) ctx.strokeText(str, x, y + Math.max(2, size * 0.12));
     ctx.strokeText(str, x, y);
   }
+  if (pixelHeading) {
+    // 도트 글꼴은 글자가 작은 정사각형 조각들로 이루어져 있어, 어중간한 크기에서는 조각 사이로 배경이 비쳐
+    // 글자 안에 격자가 보인다. 같은 색의 아주 얇은(1픽셀 미만) 테두리를 먼저 그어 그 틈만 메운다.
+    ctx.strokeStyle = fill; ctx.lineWidth = 0.9 / (ctx.getTransform().a || 1);      // 화면 기준 1픽셀 미만: 글자 모양은 그대로
+    ctx.strokeText(str, x, y);
+  }
   ctx.fillStyle = fill;
   ctx.fillText(str, x, y);
 }
@@ -3442,7 +3506,7 @@ function drawLogo(bob) {
   ctx.font = size + 'px ' + FONT;
   const wa = ctx.measureText(GAME_TITLE[0]).width, wb = ctx.measureText(GAME_TITLE[1]).width;
   const k = Math.min(1, 262 / (wa + wb));
-  ctx.save(); ctx.translate(0, -8 + bob); ctx.scale(k, k);
+  ctx.save(); ctx.translate(0, -8 + bob); if (k < 1) ctx.scale(k, k);
   const x0 = -(wa + wb) / 2;
   text(GAME_TITLE[0], x0, 0, size, '#ffffff', { outline: 10, align: 'left' });
   text(GAME_TITLE[1], x0 + wa, 0, size, '#ffd23f', { outline: 10, align: 'left' });
@@ -3498,7 +3562,7 @@ function drawMute() {
 
 const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 
-const DIFF_BW = 68, DIFF_BH = 34;
+const DIFF_BW = 54, DIFF_BH = 34;
 const uiCenter = () => (safe.l + VW - safe.r) / 2;
 function diffRects() {
   const bw = DIFF_BW * ui, bh = DIFF_BH * ui, gap = 5 * ui, total = bw * DIFFS.length + gap * (DIFFS.length - 1);
@@ -3543,8 +3607,8 @@ function profileRect() {
 function gameOverLayout() {
   // Use the same geometry for drawing and pointer hit-testing at all aspect ratios.
   const rv = canRevive() || (adBusy && state === 'OVER'), ex = rv ? 46 : 0;     // 부활 버튼이 있으면 한 줄 더
-  const k = Math.min(ui, (VW-safe.l-safe.r-18)/280,
-    (VH-safe.t-safe.b-24)/(294+ex));
+  const k = snapScale(Math.min(ui, (VW-safe.l-safe.r-18)/280,
+    (VH-safe.t-safe.b-24)/(294+ex)));
   const baseY = Math.min(VH * 0.44, PLAY_H * 0.5);
   const cy = clamp(baseY, safe.t+12+104*k, VH-safe.b-12-(157+ex)*k);
   const cx = uiCenter();
@@ -3584,7 +3648,7 @@ function inRect(x,y,r) { return x>=r.x && x<=r.x+r.w && y>=r.y && y<=r.y+r.h; }
 function modalGeometry(mode=menuMode) {
   const landscape=landscapeUI;
   const W=302, H=mode==='guide' ? 280 : mode==='graphics' ? 333 : mode==='hub' ? (landscape ? 300 : 448) : landscape ? 250 : 485;
-  const k=Math.min(ui, (VW-safe.l-safe.r-18)/W, (PLAY_H-safe.t-18)/H);
+  const k=snapScale(Math.min(ui, (VW-safe.l-safe.r-18)/W, (PLAY_H-safe.t-18)/H));
   const x=uiCenter()-W*k/2;
   const y=Math.max(safe.t+7, (PLAY_H-H*k)/2);
   return {x,y,w:W*k,h:H*k,k,W,H,landscape};
@@ -3737,7 +3801,7 @@ function drawHub(g) {
       text(name,x+7,y+(g.landscape?13:20),7,'#b5cce9',{align:'left',outline:0});
       text(String(value),x+127,y+(g.landscape?25:39),9,'#ffe699',{align:'right',outline:0});
     });
-    text('BEST E '+bests.easy+' N '+bests.normal+' H '+bests.hard+' X '+bests.hell,
+    text('BEST E '+bests.easy+' N '+bests.normal+' H '+bests.hard+' X '+bests.hell+' A '+bests.abyss,
       g.W/2,g.H-13,7,'#c5d5ed',{outline:0});
   } else if(hubTab==='BADGES') {
     const count=ACHIEVEMENTS.filter(a=>a.goal(progress)).length;
@@ -3826,7 +3890,7 @@ function drawMenu() {
 function drawUnlockToast() {
   if (!unlockToast) return;
   if (state === 'PLAYING' || state === 'DYING') return;      // 플레이 중에는 HUD 띠의 알림 칸에 표시
-  const k=Math.min(ui,1.45);
+  const k=snapScale(Math.min(ui,1.45));
   ctx.save();ctx.translate(uiCenter(),safe.t+112*k);ctx.scale(k,k);
   ctx.globalAlpha=Math.min(1,unlockToast.life/25);
   ctx.fillStyle='rgba(21,25,52,.9)';ctx.fillRect(-127,-15,254,34);
@@ -4029,9 +4093,9 @@ function fitText(str, x, y, size, col, maxW, align) {
 }
 function drawHudStrip() {
   // 띠 안쪽은 높이 46짜리 자체 좌표계로 그린다 → 기기 크기와 무관하게 같은 배치
-  const k = HUD.px / 46, W = cssW / k, L = safe.l * scale / k + 10;
+  const k = snapDevice(HUD.px / 46 * dpr) / dpr, W = cssW / k, L = safe.l * scale / k + 10;      // 띠 안쪽 배율도 격자에 맞춘다
   const playing = state === 'PLAYING' || state === 'DYING';
-  ctx.setTransform(dpr * k, 0, 0, dpr * k, 0, HUD.notch * dpr);
+  ctx.setTransform(dpr * k, 0, 0, dpr * k, 0, Math.round(HUD.notch * dpr));
   const right = W - safe.r * scale / k - ((playing ? HUD.btn * 2 + 7 : HUD.btn) + 9 + 10) / k;
 
   if (!playing) {
@@ -4094,7 +4158,13 @@ function drawHudStrip() {
     ctx.fillStyle = '#10152e'; ctx.fillRect(m0 + 3, 26, mw - 6, 7);
     ctx.fillStyle = approach ? '#ffbb79' : '#7ce6d6'; ctx.fillRect(m0 + 5, 28, (mw - 10) * clamp(score / milestone, 0, 1), 3);
   } else {
-    fitText(D.name, mc, 27, 7, D.col, mw - 6);
+    if (D.rage) {          // ABYSS: 현재 위험도
+      const r = rageAt(score);
+      fitText(r > 0 ? 'DANGER +' + (r * 100).toFixed(1).replace('.0', '') + '%' : 'ABYSS  ' + score + '/' + D.rage.from, mc, 19, 7, r > 0 ? '#ff9ad0' : D.col, mw - 6);
+      ctx.fillStyle = '#10152e'; ctx.fillRect(m0 + 3, 26, mw - 6, 7);
+      ctx.fillStyle = r > 0 ? '#ff4d8f' : D.col;
+      ctx.fillRect(m0 + 5, 28, (mw - 10) * (r > 0 ? clamp(r / 1.2, 0.04, 1) : clamp(score / D.rage.from, 0, 1)), 3);
+    } else fitText(D.name, mc, 27, 7, D.col, mw - 6);
   }
 }
 
@@ -4109,7 +4179,7 @@ function render(alpha) {
   fogF = fogAt(camX);
   const env = computeEnv();
   const userArt = hazardArt;
-  if (D.id === 'hell') hazardArt = 'INFERNO';      // HELL은 설정과 무관하게 전용 장애물 디자인
+  if (D.hell) hazardArt = 'INFERNO';      // HELL은 설정과 무관하게 전용 장애물 디자인
   ctx.fillStyle = env.sky[0];
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -4389,7 +4459,7 @@ window.addEventListener('keydown', e => {
   } else if (state === 'READY' && !menuMode && (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD')) {
     e.preventDefault(); initAudio();
     setDiff(clamp(diffIdx + (e.code === 'ArrowLeft' || e.code === 'KeyA' ? -1 : 1), 0, DIFFS.length - 1));
-  } else if (state === 'READY' && !menuMode && /^Digit[1-4]$/.test(e.code)) {
+  } else if (state === 'READY' && !menuMode && /^Digit[1-5]$/.test(e.code)) {
     initAudio(); setDiff(+e.code.slice(5) - 1);
   } else if (e.code === 'KeyM') {
     initAudio(); setMuted(!muted);
