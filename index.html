@@ -676,12 +676,35 @@ const PALS = [
     far: '#9a7aa6', farSh: '#86689a', farWin: '#b08fb6',
     near: '#4a3a6e', nearSh: '#3a2c5c', nearWin: '#62507f',
     bush: '#3f6f44', bushHi: '#6f9a54', tint: [255, 140, 120, 0.12], stars: 0.2
+  },
+  /* ---- HELL 전용 팔레트 (4: 불지옥, 5: 잿빛 황혼, 6: 심연) ---- */
+  { // 4 불지옥: 검붉은 하늘 아래로 지평선이 타오른다
+    sky: ['#1a0508', '#2e070b', '#4a0b0f', '#6e1210', '#941b10', '#bd2a10', '#e04a12', '#f47a1e'],
+    cloud: '#3a1412', cloudSh: '#220a0a',
+    far: '#5a1410', farSh: '#43100d', farWin: '#7a2412',
+    near: '#2a0808', nearSh: '#1a0505', nearWin: '#3d0f0c',
+    bush: '#1a0505', bushHi: '#5a1410', tint: [255, 60, 10, 0.18], stars: 0.55
+  },
+  { // 5 잿빛 황혼
+    sky: ['#0d0a10', '#1a1016', '#2a141a', '#40181c', '#5a1c1c', '#78221a', '#9a3018', '#b84a1c'],
+    cloud: '#2c2024', cloudSh: '#1a1216',
+    far: '#3a1a1c', farSh: '#2c1416', farWin: '#52201c',
+    near: '#1a0a0c', nearSh: '#100607', nearWin: '#2a0e0e',
+    bush: '#100607', bushHi: '#3a1a1c', tint: [120, 20, 10, 0.3], stars: 0.8
+  },
+  { // 6 심연
+    sky: ['#050206', '#0a030a', '#12050c', '#1c070e', '#2a0a10', '#3c0e10', '#541410', '#701c10'],
+    cloud: '#1c1014', cloudSh: '#100a0c',
+    far: '#220c10', farSh: '#18080c', farWin: '#34100e',
+    near: '#0c0406', nearSh: '#070203', nearWin: '#1a0808',
+    bush: '#070203', bushHi: '#220c10', tint: [40, 0, 10, 0.45], stars: 1
   }
 ];
 for (const p of PALS) { p.skyRGB = p.sky.map(hex); p.cloudRGB = hex(p.cloud); p.cloudShRGB = hex(p.cloudSh); }
 
 /* 하루 = tod 0→1.  낮(0) → 노을(0.30) → 밤(0.42~0.72) → 새벽(0.85) → 낮(1) */
 const TIMELINE = [[0, 0], [0.17, 0], [0.30, 1], [0.42, 2], [0.72, 2], [0.85, 3], [1, 0]];
+const HELL_TIMELINE = [[0, 4], [0.2, 4], [0.34, 5], [0.45, 6], [0.72, 6], [0.86, 5], [1, 4]];   // HELL: 불지옥 → 잿빛 → 심연 → 잿빛 → 불지옥
 const DAY_LEN = 10500;                 // 하루가 지나는 데 필요한 비행 거리 (약 40점)
 const smooth = t => t * t * (3 - 2 * t);
 // 창문 불빛 기준이 되는 "어두움" 0~1
@@ -819,6 +842,24 @@ function renderBushes(col, hi) {
 }
 const shadeHex = (h, k) => 'rgb(' + hex(h).map(v => Math.round(v * (1 - k) + 22 * k)).join(',') + ')';
 for (const p of PALS) p.bushImg = renderBushes(shadeHex(p.near, 0.44), shadeHex(p.near, 0.16));
+// HELL: 옥상 설비 대신 뾰족한 바위 송곳니
+function renderSpikes(col, hi) {
+  const [c, g] = makeCanvas(BUSH_W, BUSH_H);
+  const r = mulberry(666), B = BUSH_H;
+  g.fillStyle = col; g.fillRect(0, B - 3, BUSH_W, 3);
+  let x = 0;
+  while (x < BUSH_W - 12) {
+    const bw = 4 + Math.floor(r() * 8), h = 5 + Math.floor(r() * 12), lean = Math.floor(r() * 3) - 1;
+    for (let i = 0; i < bw; i++) {
+      const ch = Math.max(1, Math.round(h * (1 - Math.abs(i - (bw - 1) / 2 - lean) / (bw / 2 + 1))));
+      g.fillStyle = col; g.fillRect(x + i, B - 3 - ch, 1, ch);
+      if (i === 0 || i === 1) { g.fillStyle = hi; g.fillRect(x + i, B - 3 - ch, 1, 1); }
+    }
+    x += bw + Math.floor(r() * 7);
+  }
+  return c;
+}
+for (let i = 4; i < PALS.length; i++) PALS[i].bushImg = renderSpikes(PALS[i].bush, PALS[i].bushHi);
 
 // 안개 구간용 검은 실루엣
 function silhouette(img) {
@@ -845,6 +886,22 @@ const girderImg = (() => {
   g.fillStyle = '#121833'; g.fillRect(0, DIRT_H - 1, DIRT_W, 1);
   g.fillStyle = '#5a6eb2';
   for (const x of [3, 27, 35, 59]) { g.fillRect(x, 3, 1, 1); g.fillRect(x, 28, 1, 1); }
+  return c;
+})();
+
+/* --- HELL 바닥 아래 균열 암반 타일 --- */
+const hellRockImg = (() => {
+  const [c, g] = makeCanvas(DIRT_W, DIRT_H), r = mulberry(13);
+  g.fillStyle = '#170607'; g.fillRect(0, 0, DIRT_W, DIRT_H);
+  for (let i = 0; i < 60; i++) { g.fillStyle = r() < 0.5 ? '#220a0a' : '#0f0404'; g.fillRect(Math.floor(r() * DIRT_W), Math.floor(r() * DIRT_H), 1 + Math.floor(r() * 3), 1); }
+  for (let k = 0; k < 4; k++) {                  // 빛나는 균열
+    let x = Math.floor(r() * DIRT_W), y = 0;
+    while (y < DIRT_H) {
+      g.fillStyle = '#7a1808'; g.fillRect((x + DIRT_W) % DIRT_W, y, 2, 2);
+      if (r() < 0.45) { g.fillStyle = '#ff5a14'; g.fillRect((x + DIRT_W) % DIRT_W, y, 1, 1); }
+      y += 2; x += Math.floor(r() * 3) - 1;
+    }
+  }
   return c;
 })();
 
@@ -926,8 +983,9 @@ function moonLight(T) {
 function computeEnv() {
   const T = tod - Math.floor(tod);
   let i = 0;
-  while (i < TIMELINE.length - 2 && T >= TIMELINE[i + 1][0]) i++;
-  const [t0, a] = TIMELINE[i], [t1, b] = TIMELINE[i + 1];
+  const hell = D.id === 'hell', TL = hell ? HELL_TIMELINE : TIMELINE;
+  while (i < TL.length - 2 && T >= TL[i + 1][0]) i++;
+  const [t0, a] = TL[i], [t1, b] = TL[i + 1];
   const f = a === b ? 0 : smooth(clamp((T - t0) / (t1 - t0), 0, 1));
   const A = PALS[a], B = PALS[b];
   const sun = sunLight(T), moon = moonLight(T);
@@ -942,8 +1000,12 @@ function computeEnv() {
     moon.core = mix3(moon.core, [236, 243, 255], F); moon.rgb = mix3(moon.rgb, [150, 186, 255], F);
     sun.weight *= 1 - F;
   }
+  if (hell) {      // 핏빛 해와 달
+    sun.core = [255, 170, 120]; sun.rgb = [255, 60, 20]; sun.disc = [226, 44, 22]; sun.discHi = [255, 128, 64];
+    moon.core = [255, 190, 160]; moon.rgb = [255, 84, 46]; moon.disc = [206, 64, 44]; moon.discHi = [128, 30, 24];
+  }
   return {
-    T, a, b, f,
+    T, a, b, f, hell,
     sky: A.skyRGB.map((c, k) => rgb(mix3(c, B.skyRGB[k], f))),
     cloud: rgb(mix3(A.cloudRGB, B.cloudRGB, f)), cloudSh: rgb(mix3(A.cloudShRGB, B.cloudShRGB, f)),
     tintCol: rgb(mix3(A.tint, B.tint, f)), tintA: lerp(A.tint[3], B.tint[3], f),
@@ -975,7 +1037,7 @@ const DIFFS = [
   { id: 'easy',   name: 'EASY',   col: '#7be06a', gap0: 204, gap1: 144, sp0: 2.28, sp1: 3.18, ramp: 46, moveFrom: 22, moveP: 0.24, amp: 18, variety: 0.85, fog: false },
   { id: 'normal', name: 'NORMAL', col: '#ffd23f', gap0: 188, gap1: 126, sp0: 2.45, sp1: 3.5,  ramp: 38, moveFrom: 14, moveP: 0.32, amp: 22, variety: 1,    fog: false },
   { id: 'hard',   name: 'HARD',   col: '#ff9a3d', gap0: 176, gap1: 116, sp0: 2.6,  sp1: 3.75, ramp: 32, moveFrom: 10, moveP: 0.38, amp: 24, variety: 1,    fog: true },
-  { id: 'hell',   name: 'HELL',   col: '#ff4d5e', gap0: 164, gap1: 108, sp0: 2.8,  sp1: 4.1,  ramp: 24, moveFrom: 5,  moveP: 0.45, amp: 26, variety: 1,    fog: true }
+  { id: 'hell',   name: 'HELL',   col: '#ff4d5e', gap0: 158, gap1: 104, sp0: 2.9,  sp1: 4.25, ramp: 20, moveFrom: 4,  moveP: 0.4,  amp: 26, variety: 1,    fog: true }
 ];
 // Keep procedural reachable-gap estimates consistent with the selected skin's physics.
 const skinFlightSpeed = (n) => speedFor(n) * activeSkin.speed;
@@ -1020,6 +1082,32 @@ const spacingFor = n => 236 + 34 * trendAt(n);
    밤마다 한 번, 안개 낀 지역을 지난다. 모든 것이 검은 실루엣이 되고 달빛 빛줄기와 그림자로만 길을 읽어야 한다.
    첫 밤은 기둥 4개, 이후 밤마다 1개씩 길어진다. 대신 구간 안에서는 틈이 조금 넓고 움직이는 기둥이 없다. */
 const FOG_BASE_LEN = 4, FOG_MAX_LEN = 8, FOG_RAMP = 260, FOG_GAP_BONUS = 14;
+/* HELL 전용: 장애물 색(용암·피·혼불)과 화염 분출구 설정 */
+const HELL_THEMES = {
+  green:   { main: '#ff6a1a', hi: '#ffd27a', hi2: '#ff9a3a', sh: '#b0300c', dk: '#6a1406' },   // 용암
+  copper:  { main: '#ffb020', hi: '#fff0a0', hi2: '#ffd060', sh: '#b87010', dk: '#6e4208' },   // 녹은 금
+  aqua:    { main: '#3fe0b0', hi: '#c8ffe9', hi2: '#7af0cc', sh: '#1c8f72', dk: '#0f5846' },   // 혼불
+  crimson: { main: '#e0203a', hi: '#ff9aa6', hi2: '#f25a6a', sh: '#8f0f24', dk: '#560814' },   // 피
+  steel:   { main: '#b060ff', hi: '#ecd0ff', hi2: '#cf98ff', sh: '#6a2cb8', dk: '#3f1877' }    // 저주 (움직이는 기둥)
+};
+const themeOf = p => (D.id === 'hell' ? HELL_THEMES[p.theme] : null) || THEMES[p.theme];
+/* 불기둥: 기둥과 기둥 사이에서 용암 바닥·천장으로부터 솟는 화염 장애물.
+   - perm(상시): 꺼지지 않고 타오르며 숨 쉬듯 일렁인다. 바닥형 / 천장형 / 위아래가 맞물린 화염문(twin).
+   - burst(분출): 예고(화구가 끓어오름) 뒤 순식간에 같은 높이까지 치솟았다가 꺼진다.
+   높이: 앞뒤 틈의 중심을 잇는 비행 경로에서 margin 만큼만 남기고 끝까지 닿는다. 그래서 경로가 높으면 바닥 불기둥이
+   화면 절반 이상을 덮고, 경로가 낮으면 천장에서 그만큼 내려온다. 경로 자체는 항상 열려 있어 피할 수 있다.
+   from: 몇 번째 기둥부터, chance: 기둥 사이마다 등장 확률, minReach: 이보다 낮은 불기둥은 만들지 않음 */
+const HELL_JETS = { enabled: true, from: 4, chance: 0.6, margin: 58, minSpace: 150, minReach: 90, halfW: 16 };
+let jets = [], lastAmp = 0, lastDeathBy = '';
+function jetState(j, ceil) {
+  if (j.mode === 'perm') return { warn: 1, lvl: 0.9 + 0.1 * Math.sin(tick * 0.11 + j.ph + (ceil ? 2 : 0)) };
+  // burst: 쉼 → 예고 45프레임 → 분출 70프레임. twin의 천장 쪽은 반 박자 어긋난다.
+  const t = (tick + j.ph + (ceil && j.type === 'twin' ? j.per / 2 : 0)) % j.per, e0 = j.per - 70;
+  if (t < e0 - 45) return { warn: 0, lvl: 0 };
+  if (t < e0) return { warn: (t - (e0 - 45)) / 45, lvl: 0 };
+  const e = (t - e0) / 70;
+  return { warn: 1, lvl: e < 0.1 ? e / 0.1 : e > 0.85 ? (1 - e) / 0.15 : 0.94 + 0.06 * Math.sin(tick * 0.4) };
+}
 const THEMES = {
   green:  { main: '#e0b83a', hi: '#fff0a0', hi2: '#f2d264', sh: '#b08a22', dk: '#7d6014' },   // (키 이름만 green, 실제 색은 앰버)
   copper: { main: '#d98a3c', hi: '#ffc77d', hi2: '#eda45a', sh: '#b0652a', dk: '#84451b' },
@@ -1055,6 +1143,7 @@ function setDiff(i) {
   diffIdx = i; D = DIFFS[i]; track = []; visualDirty = true;
   try { localStorage.setItem('flappy_hero_diff2', D.id); } catch (e) {}
   tone('square', 520 + i * 130, 520 + i * 130, 0.07, 0.12);
+  visualDirty = raysDirty = true; heroRayCache = null;      // 난이도별 테마(HELL)가 바로 보이도록
 }
 
 let dist = 0, prevDist = 0;          // 게임 진행 거리 (판정용)
@@ -1381,6 +1470,7 @@ function resetGame() {
   if (tod - Math.floor(tod) > 0.01) todFF = true;
   fog = null; fogCount = 0; fogDay = -1;
   revivesUsed = 0; reviveHold = false; reviveNote = '';
+  jets = []; lastAmp = 0; lastDeathBy = '';
 }
 
 /* 장애물 패턴
@@ -1557,7 +1647,26 @@ function spawnPipe() {
     passMinClearance: Infinity, midDeviation: Infinity, midDx: Infinity, minObservedGap: Infinity
   });
   if (fog && n === fog.lastN) fog.end = wx + w + 50;
-  lastWX = wx; lastC = c; lastW = w; lastGap = gap - pulseAmp;
+  // HELL: 이전 기둥과 이번 기둥 사이에 화염 분출구
+  if (D.id === 'hell' && HELL_JETS.enabled && n >= HELL_JETS.from && !bossGate && !relief && !inFog &&
+      !(fog && n - 1 >= fog.firstN && n - 1 <= fog.lastN) && Math.random() < HELL_JETS.chance) {
+    const space = wx - (lastWX + lastW);
+    if (space >= HELL_JETS.minSpace) {
+      const top = Math.min(lastC - lastAmp, c - amp) - HELL_JETS.margin;       // 천장 불기둥이 내려오는 끝
+      const bot = Math.max(lastC + lastAmp, c + amp) + HELL_JETS.margin;       // 바닥 불기둥이 올라오는 끝
+      const rc = top, rf = PLAY_H - bot, mr = HELL_JETS.minReach;              // 각 불기둥의 높이
+      let type = null;
+      if (rc >= mr && rf >= mr) type = Math.random() < 0.5 ? 'twin' : (rf > rc ? 'floor' : 'ceil');
+      else if (rf >= mr) type = 'floor';
+      else if (rc >= mr) type = 'ceil';
+      if (type) {
+        const per = Math.round(rnd(150, 200));
+        jets.push({ wx: lastWX + lastW + space / 2, type, top, bot, per, ph: Math.floor(Math.random() * per),
+                    mode: Math.random() < 0.6 ? 'perm' : 'burst', seen: false, wasOn: false });
+      }
+    }
+  }
+  lastWX = wx; lastC = c; lastW = w; lastGap = gap - pulseAmp; lastAmp = amp;
 }
 const pipeCenter = p => p.amp ? p.c + Math.sin(tick * p.sp + p.ph) * p.amp : p.c;
 
@@ -1862,6 +1971,27 @@ function step() {
       }
       if (p.wx - dist + heroX < -p.w - 40) { pipes.splice(i, 1); i--; }
     }
+    // HELL 불기둥: 판정 + 굉음 + 가까이 지날 때의 진동
+    if (state === 'PLAYING' && jets.length) {
+      for (let i = jets.length - 1; i >= 0; i--) {
+        const j = jets[i], sxp = j.wx - dist + heroX;
+        if (sxp < -90) { jets.splice(i, 1); continue; }
+        const lf = j.type !== 'ceil' ? jetState(j, false).lvl : 0, lc = j.type !== 'floor' ? jetState(j, true).lvl : 0;
+        const on = Math.max(lf, lc) > 0.3;
+        if (sxp < VW + 40) {
+          if (on && (!j.wasOn || !j.seen)) { noise(0.55, j.mode === 'perm' ? 0.16 : 0.3, 900, 90); tone('sawtooth', 70, 38, 0.5, 0.1); }
+          j.seen = true;
+        }
+        j.wasOn = on;
+        const dx = Math.abs(j.wx - dist);
+        if (on && dx < 90) shake = Math.max(shake, 2.4 * (1 - dx / 90));
+        if (dx >= HIT_HW + HELL_JETS.halfW) continue;
+        let burn = false;
+        if (lf > 0.3 && hero.y + HIT_HH > PLAY_H - (PLAY_H - j.bot) * lf + 8) burn = true;
+        if (lc > 0.3 && hero.y - HIT_HH < j.top * lc - 8) burn = true;
+        if (burn && !guardHit()) { lastDeathBy = 'jet'; die(false); break; }
+      }
+    }
     if (state === 'PLAYING' && hero.y + HIT_HH >= PLAY_H) {
       if (guardHit()) {
         hero.y=PLAY_H-HIT_HH-2;
@@ -1937,7 +2067,7 @@ function drawBody(lt) {
   const cx = Math.round(lt.x / 2) * 2, cy = Math.round(lt.y / 2) * 2, r = Math.round(lt.r / 2) * 2;
   if (lt.sun) {
     ctx.globalAlpha = 0.3; disc(cx, cy, r + 12, rgb(lt.discHi), 2);
-    ctx.globalAlpha = 1; disc(cx, cy, r, rgb(lt.disc), 2); disc(cx - 4, cy - 4, Math.round(r * 0.3) * 2, rgb(lt.discHi), 2);
+    ctx.globalAlpha = 1; disc(cx, cy, r, rgb(lt.disc), 2); disc(cx, cy, Math.round(r * 0.3) * 2, rgb(lt.discHi), 2);   // 안쪽 밝은 원도 같은 중심
   } else {
     ctx.globalAlpha = 0.18; disc(cx, cy, r + 12, '#cfd8ff', 2);
     ctx.globalAlpha = 1; disc(cx, cy, r, rgb(lt.disc), 2);
@@ -1966,7 +2096,7 @@ const FOG_BASE = 'rgb(13,18,38)', FOG_HAZE = 'rgb(44,56,94)';
 // 레이어 사이에 낀 안개: 옅은 연무 + 달빛에 빛나는 안개(빛줄기 버퍼)를 한 겹 덮는다.
 // 뒤에 있는 레이어일수록 여러 겹이 쌓여 흐려지므로 거리감이 생긴다.
 function fogVeil(haze, glow) {
-  ctx.globalAlpha = fogF * haze; ctx.fillStyle = FOG_HAZE;
+  ctx.globalAlpha = fogF * haze; ctx.fillStyle = D.id === 'hell' ? 'rgb(96,30,22)' : FOG_HAZE;
   ctx.fillRect(0, 0, VW, PLAY_H);
   ctx.globalAlpha = 1;
   compositeRays(fogF * glow);
@@ -1985,11 +2115,15 @@ function drawSky(sx, env) {
     for (const s of STARS) {
       ctx.globalAlpha = env.stars * (1 - F) * (0.55 + 0.45 * Math.sin(tick * 0.05 + s.ph));
       const sz = s.big ? 4 : 2;
-      ctx.fillRect(Math.round(s.fx * VW / 2) * 2, Math.round(s.fy * PLAY_H / 2) * 2, sz, sz);
+      if (env.hell) {      // 별 대신 위로 날아오르는 불티
+        const ey = ((s.fy * 1.7 * PLAY_H - tick * (0.35 + s.ph * 0.09)) % PLAY_H + PLAY_H) % PLAY_H;
+        ctx.fillStyle = s.big ? '#ffd27a' : (s.ph > 3 ? '#ff7a2a' : '#ff4a1a');
+        ctx.fillRect(Math.round((s.fx * VW + Math.sin(tick * 0.03 + s.ph) * 10) / 2) * 2, Math.round(ey / 2) * 2, sz, sz);
+      } else ctx.fillRect(Math.round(s.fx * VW / 2) * 2, Math.round(s.fy * PLAY_H / 2) * 2, sz, sz);
     }
     ctx.globalAlpha = 1;
   }
-  if (F > 0.001) { ctx.globalAlpha = F * 0.94; ctx.fillStyle = FOG_BASE; ctx.fillRect(0, 0, VW, PLAY_H); ctx.globalAlpha = 1; }
+  if (F > 0.001) { ctx.globalAlpha = F * 0.94; ctx.fillStyle = D.id === 'hell' ? 'rgb(26,6,8)' : FOG_BASE; ctx.fillRect(0, 0, VW, PLAY_H); ctx.globalAlpha = 1; }
   // 해와 달
   for (const lt of [env.moon, env.sun]) {
     if (!lt.vis || lt.y - lt.r * 5 > PLAY_H) continue;
@@ -2056,7 +2190,21 @@ function drawHazardBody(x,y,w,h,t,p,upper){
   const a0=upper?y+h:y;
   const seg=(S0,fn)=>{ for(let k=0;k*S0<h+S0;k++) fn(upper?a0-(k+1)*S0:a0+k*S0,k); };
   hazardRect(x,y,w,h,HAZARD_INK);
-  if(hazardArt==='SENTINEL'){
+  if(hazardArt==='INFERNO'){
+    // 지옥 기둥: 그을린 흑요석에 용암 혈관이 지그재그로 흐른다
+    hazardRect(x,y,w,h,'#0a0304');
+    hazardRect(x+2,y,w-4,h,'#1f0b0c');hazardRect(x+2,y,4,h,'#42181a');hazardRect(x+w-8,y,6,h,'#0e0405');
+    const d=Math.max(4,Math.round(w*0.13)), mid=Math.round(x+w/2);
+    seg(24,(by,k)=>{
+      const sgn=k%2?-1:1, vx=mid+sgn*d-3;
+      const hot=((k*24+tick*1.5)%120)<30;
+      hazardRect(vx-2,by,10,24,'#0e0405');
+      hazardRect(vx,by,6,24,t.sh);hazardRect(vx+1,by,4,24,hot?t.hi2:t.main);hazardRect(vx+2,by,2,24,hot?'#ffffff':t.hi);
+      hazardRect(mid-d-3,upper?by+20:by,d*2+6,4,t.sh);hazardRect(mid-d-2,upper?by+21:by+1,d*2+4,2,hot?t.hi:t.main);
+      hazardRect(x+2,by+6,6,3,'#42181a');hazardRect(x+w-8,by+14,6,3,'#42181a');           // 갈라진 돌 결
+      hazardRect(x+10+(k*7)%Math.max(1,w-24),by+10,2,2,t.hi2);                              // 박힌 불씨
+    });
+  }else if(hazardArt==='SENTINEL'){
     // 방어 파일런: 강철 외장 + 가운데 에너지 도관(틈을 향해 흐르는 펄스)
     const cw=Math.max(10,Math.round(w*0.12)*2), cl=Math.round(x+w/2-cw/2);
     hazardRect(x+2,y,w-4,h,'#2e3966');
@@ -2118,7 +2266,20 @@ function drawHazardCap(x,y,w,t,p,upper){
   const cx=x+w/2, H=CAP_H, edge=upper?y+H-2:y, pulse=.6+.4*Math.sin(tick*.12+(p.ph||0));
   ctx.save();ctx.beginPath();ctx.rect(x,y,w,H);ctx.clip();
   hazardRect(x,y,w,H,HAZARD_INK);
-  if(hazardArt==='SENTINEL'){
+  if(hazardArt==='INFERNO'){
+    // 아가리: 이글거리는 목구멍 앞에 뼈 송곳니가 틈을 향해 나 있다
+    hazardRect(x,y,w,H,'#0a0304');
+    hazardRect(x+2,y+2,w-4,H-4,'#2c0e0d');
+    hazardRect(x+2,upper?y+2:y+H-6,w-4,4,'#4d1c18');
+    const my=upper?y+H-15:y+3;
+    hazardRect(x+4,my,w-8,12,t.dk);hazardRect(x+5,my+2,w-10,8,t.main);hazardRect(x+6,my+4,w-12,4,t.hi);
+    for(let tx=x+5;tx<x+w-9;tx+=10){
+      if(upper){hazardRect(tx,y+H-13,6,8,'#efe2c6');hazardRect(tx+1,y+H-5,4,3,'#efe2c6');hazardRect(tx+2,y+H-2,2,2,'#cbb78f');hazardRect(tx,y+H-13,2,8,'#ffffff');}
+      else{hazardRect(tx,y+5,6,8,'#efe2c6');hazardRect(tx+1,y+2,4,3,'#efe2c6');hazardRect(tx+2,y,2,2,'#cbb78f');hazardRect(tx,y+5,2,8,'#ffffff');}
+    }
+    const ey=upper?y+6:y+H-9;                                                              // 노려보는 눈
+    hazardRect(cx-11,ey,6,3,t.hi);hazardRect(cx+5,ey,6,3,t.hi);hazardRect(cx-9,ey+1,2,2,'#0a0304');hazardRect(cx+7,ey+1,2,2,'#0a0304');
+  }else if(hazardArt==='SENTINEL'){
     hazardRect(x+2,y+2,w-4,H-4,'#3d4a80');
     hazardRect(x+2,upper?y+2:y+H-6,w-4,4,upper?'#6f83c6':'#252d57');
     hazardRect(x+2,y+2,3,H-4,'#6f83c6');hazardRect(x+w-6,y+2,4,H-4,'#252d57');
@@ -2184,7 +2345,7 @@ function drawPipeBloom(camX) {
   for (const p of pipes) {
     const x = R(p.wx - camX + heroX);
     if (x > VW + 30 || x < -p.w - 30) continue;
-    const t = THEMES[p.theme], spr = glowSprite(t.hi), cx = x + p.w / 2;
+    const t = themeOf(p), spr = glowSprite(t.hi), cx = x + p.w / 2;
     const c = pipeCenter(p), g = pipeGap(p), top = Math.round(c - g / 2), bot = Math.round(c + g / 2);
     const pulse = 0.6 + 0.4 * Math.sin(tick * 0.12 + (p.ph || 0));
 
@@ -2231,7 +2392,7 @@ function drawPipes(camX, tintCol, tintA) {
   for(const p of pipes){
     const x=R(p.wx-camX+heroX);
     if(x>VW+10||x<-p.w-10)continue;
-    const t=THEMES[p.theme];
+    const t=themeOf(p);
     const c=pipeCenter(p),g=pipeGap(p),top=Math.round(c-g/2),bot=Math.round(c+g/2);
     drawHazardBody(x,-4,p.w,top-CAP_H+4,t,p,true);
     drawHazardCap(x,top-CAP_H,p.w,t,p,true);
@@ -2610,8 +2771,9 @@ function applyLocalHeroLight(g,hy,hr,camX) {
 
 // 광원 주변의 블룸(번짐). 건물·기둥보다 뒤에 그려 실루엣이 살아나게 한다.
 function drawBloom(lt) {
-  const R0 = lt.r * 5;
-  const g = ctx.createRadialGradient(lt.x, lt.y, 0, lt.x, lt.y, R0);
+  // 번짐도 도트 원과 같은(2유닛 격자에 맞춘) 중심을 쓴다 → 원과 빛이 어긋나지 않는다
+  const R0 = lt.r * 5, bx = Math.round(lt.x / 2) * 2, by = Math.round(lt.y / 2) * 2;
+  const g = ctx.createRadialGradient(bx, by, 0, bx, by, R0);
   const a0 = lerp(0.4, 1, lt.e);            // 낮게 뜬 해·달은 중심이 하얗게 날아가지 않게 해서 본래 색을 살린다
   g.addColorStop(0, 'rgba(' + csv(lt.core) + ',' + a0 + ')');
   g.addColorStop(0.16, 'rgba(' + csv(lt.core) + ',' + a0 * 0.9 + ')');
@@ -2621,7 +2783,7 @@ function drawBloom(lt) {
   ctx.globalCompositeOperation = 'screen';
   ctx.globalAlpha = Math.min(1, lt.k * 1.2);
   ctx.fillStyle = g;
-  ctx.fillRect(lt.x - R0, lt.y - R0, R0 * 2, Math.min(R0 * 2, PLAY_H - (lt.y - R0)));
+  ctx.fillRect(bx - R0, by - R0, R0 * 2, Math.min(R0 * 2, PLAY_H - (by - R0)));
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
 }
@@ -2792,7 +2954,116 @@ function drawGroundGlow(lt, camX) {
   ctx.restore();
 }
 
+function flameColumn(cx, base, dir, h, seed) {
+  // 도트 불기둥. 굵은 몸통이 높이의 대부분을 유지하다 끝에서 갈라지며, 겹마다 다른 박자로 요동친다.
+  if (h < 6) return;
+  const layers = [['#3a0604', 31, 1.0], ['#a3130a', 27, 0.985], ['#ff4a10', 21, 0.94], ['#ffa22e', 14, 0.86], ['#ffe98a', 8, 0.72], ['#ffffff', 3, 0.5]];
+  for (let li = 0; li < layers.length; li++) {
+    const col = layers[li][0], hw = layers[li][1], hh = h * layers[li][2];
+    ctx.fillStyle = col;
+    for (let d = 0; d < hh; d += 4) {
+      const t = d / hh;
+      const prof = t < 0.08 ? 1.25 - t * 3.1 : 1 - Math.pow(t, 3.2);                       // 밑동은 넓게, 끝만 가늘게
+      const lick = 0.8 + 0.2 * Math.sin(tick * 0.62 - d * 0.19 + li * 1.7 + seed) + 0.1 * Math.sin(tick * 1.3 + d * 0.41 + seed);
+      const ww = hw * prof * lick;
+      if (ww < 1) continue;
+      const wob = Math.sin(tick * 0.33 - d * 0.07 + seed) * (2 + 5 * t) + Math.sin(tick * 0.9 + d * 0.23 + li) * 1.5;
+      ctx.fillRect(Math.round(cx - ww + wob), dir < 0 ? base - d - 4 : base + d, Math.round(ww * 2), 4);
+    }
+  }
+  // 옆으로 튀어나오는 불꽃 혀
+  for (let k = 0; k < 6; k++) {
+    const d = ((tick * 3.1 + k * 71 + seed * 40) % Math.max(40, h * 0.9)), t = d / h, side = k & 1 ? 1 : -1;
+    const ox = side * (20 + 8 * Math.sin(tick * 0.5 + k)) * (1 - t * 0.5), yy = dir < 0 ? base - d : base + d;
+    ctx.fillStyle = k % 3 ? '#ff6a1a' : '#ffd27a';
+    ctx.fillRect(Math.round(cx + ox - 3), yy - 6, 6, 10); ctx.fillRect(Math.round(cx + ox * 1.25 - 2), yy - (dir < 0 ? 12 : -4), 4, 6);
+  }
+  // 끝에서 피어오르는 검은 연기와 불티
+  const tip = dir < 0 ? base - h : base + h;
+  for (let k = 0; k < 5; k++) {
+    const a = (tick * 1.6 + k * 37 + seed * 20) % 60, sx2 = cx + Math.sin(k * 2.3 + tick * 0.06) * (10 + a * 0.3);
+    ctx.globalAlpha = 0.5 * (1 - a / 60);
+    ctx.fillStyle = '#1a0a0a'; ctx.fillRect(Math.round(sx2 - 6), tip + (dir < 0 ? -a : a) - 5, 12, 10);
+    ctx.globalAlpha = 1 - a / 60;
+    ctx.fillStyle = '#ffd27a'; ctx.fillRect(Math.round(cx + Math.sin(k * 1.7 + tick * 0.21) * (16 + a * 0.5)), tip + (dir < 0 ? -a * 1.4 : a * 1.4), 2, 2);
+  }
+  ctx.globalAlpha = 1;
+  // 빛: 기둥 전체의 번짐 + 주변을 물들이는 넓은 붉은 빛
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter'; ctx.imageSmoothingEnabled = true;
+  const gy = dir < 0 ? base - h - 30 : base - 30;
+  ctx.globalAlpha = 0.75; ctx.drawImage(glowSprite('#ff6a1a'), cx - 70, gy, 140, h + 60);
+  ctx.globalAlpha = 0.28; ctx.drawImage(glowSprite('#ff2a0a'), cx - 150, gy - 20, 300, h + 100);
+  ctx.restore();
+  ctx.imageSmoothingEnabled = false;
+}
+function drawJets(camX) {
+  if (!jets.length) return;
+  for (const j of jets) {
+    const x = R(j.wx - camX + heroX);
+    if (x < -160 || x > VW + 160) continue;
+    for (const ceil of [false, true]) {
+      if (ceil ? j.type === 'floor' : j.type === 'ceil') continue;
+      const st = jetState(j, ceil), dir = ceil ? 1 : -1;
+      const reach = ceil ? j.top : PLAY_H - j.bot, vb = ceil ? 0 : PLAY_H, seed = j.ph + (ceil ? 3 : 0);
+      if (st.lvl > 0) flameColumn(x, vb, dir, reach * st.lvl, seed);
+      else if (st.warn > 0) {
+        // 예고: 화구가 끓어오르며 불꽃이 점점 커지고 불티가 높이 튄다
+        flameColumn(x, vb, dir, 18 + 34 * st.warn + 6 * Math.sin(tick * 0.7), seed);
+        ctx.fillStyle = '#ffd27a'; ctx.globalAlpha = 0.5 + 0.5 * st.warn;
+        for (let i = 0; i < 7; i++) {
+          const d = (tick * 3 + i * 29) % (50 + (reach - 50) * st.warn);
+          ctx.fillRect(Math.round(x + Math.sin(i * 2.1 + tick * 0.17) * 12), ceil ? d : PLAY_H - d, 2, 3);
+        }
+        ctx.globalAlpha = 1;
+      }
+      // 화구: 송곳니가 돋은 검은 암석 (불기둥 밑동을 감싼다)
+      const hot = st.warn > 0 && ((tick >> 2) & 1 || st.lvl > 0);
+      if (ceil) {
+        hazardRect(x - 34, 0, 68, 7, '#0a0304'); hazardRect(x - 30, 7, 12, 8, '#1f0b0c'); hazardRect(x + 18, 7, 12, 8, '#1f0b0c');
+        hazardRect(x - 27, 15, 6, 6, '#2c0e0d'); hazardRect(x + 21, 15, 6, 6, '#2c0e0d');
+        hazardRect(x - 30, 5, 60, 2, hot ? '#ffd27a' : '#7a1808');
+      } else {
+        hazardRect(x - 34, PLAY_H - 7, 68, 7, '#0a0304'); hazardRect(x - 30, PLAY_H - 15, 12, 8, '#1f0b0c'); hazardRect(x + 18, PLAY_H - 15, 12, 8, '#1f0b0c');
+        hazardRect(x - 27, PLAY_H - 21, 6, 6, '#2c0e0d'); hazardRect(x + 21, PLAY_H - 21, 6, 6, '#2c0e0d');
+        hazardRect(x - 30, PLAY_H - 7, 60, 2, hot ? '#ffd27a' : '#7a1808');
+      }
+    }
+  }
+}
+function drawLavaGround(sx, tintCol, tintA) {
+  // HELL 바닥: 흐르는 용암 강과 그 아래의 균열 암반
+  const y = PLAY_H, m = (v, n) => ((v % n) + n) % n;
+  const off = m(sx, DIRT_W * 2);
+  for (let ty = y + 18; ty < VH; ty += DIRT_H * 2)
+    for (let tx = -off; tx < VW; tx += DIRT_W * 2)
+      ctx.drawImage(hellRockImg, R(tx), ty, DIRT_W * 2 + 1 / S, DIRT_H * 2 + 1 / S);
+  for (let i = 1; i <= 4; i++) {
+    const dy = y + 18 + 34 * i * i * 0.5;
+    if (dy >= VH) break;
+    ctx.fillStyle = 'rgba(8,0,0,0.24)'; ctx.fillRect(0, dy, VW, VH - dy);
+  }
+  if (tintA > 0) { ctx.globalAlpha = tintA; ctx.fillStyle = tintCol; ctx.fillRect(0, y + 18, VW, VH - y - 18); ctx.globalAlpha = 1; }
+  ctx.fillStyle = '#ff5a14'; ctx.fillRect(0, y, VW, 16);                       // 용암 (스스로 빛나므로 틴트 없음)
+  ctx.fillStyle = '#ffb03a';
+  const w1 = m(sx + tick * 0.45, 44);
+  for (let x = -44 - w1, i = 0; x < VW + 44; x += 44, i++) ctx.fillRect(R(x), y + 3 + ((i + (tick >> 4)) & 1) * 2, 26, 3);
+  ctx.fillStyle = '#ffe27a';
+  const w2 = m(sx + tick * 0.95, 70);
+  for (let x = -70 - w2; x < VW + 70; x += 70) ctx.fillRect(R(x + 12), y + 9, 12, 2);
+  ctx.fillStyle = '#4a120a';                                                   // 떠내려가는 굳은 껍질
+  const w3 = m(sx, 96);
+  for (let x = -96 - w3; x < VW + 96; x += 96) { ctx.fillRect(R(x + 20), y + 7, 30, 5); ctx.fillRect(R(x + 26), y + 5, 16, 2); ctx.fillRect(R(x + 66), y + 11, 14, 3); }
+  ctx.fillStyle = '#ffe9a0'; ctx.fillRect(0, y, VW, 2);
+  ctx.fillStyle = '#8a1c08'; ctx.fillRect(0, y + 14, VW, 2);
+  ctx.fillStyle = '#2a0806'; ctx.fillRect(0, y + 16, VW, 3);
+  // 용암의 열기가 위로 번진다
+  const hg = ctx.createLinearGradient(0, y - 110, 0, y);
+  hg.addColorStop(0, 'rgba(255,90,20,0)'); hg.addColorStop(1, 'rgba(255,90,20,' + (0.3 * (1 - fogF * 0.7)) + ')');
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = hg; ctx.fillRect(0, y - 110, VW, 110); ctx.restore();
+}
 function drawGround(sx, tintCol, tintA) {
+  if (D.id === 'hell') { drawLavaGround(sx, tintCol, tintA); return; }
   // 바닥: 도시 위를 가로지르는 고가 데크(차선 + 경고등 + 트러스 구조물)
   const y = PLAY_H, m = (v, n) => ((v % n) + n) % n;
   const off = m(sx, DIRT_W * 2);
@@ -3837,6 +4108,8 @@ function render(alpha) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   fogF = fogAt(camX);
   const env = computeEnv();
+  const userArt = hazardArt;
+  if (D.id === 'hell') hazardArt = 'INFERNO';      // HELL은 설정과 무관하게 전용 장애물 디자인
   ctx.fillStyle = env.sky[0];
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -3862,7 +4135,8 @@ function render(alpha) {
   blackPipes(camX, fogF);
   compositeRays(1);
   blackPipes(camX, fogF * 0.82);
-  drawPipeBloom(camX);                    // 장애물 발광부 블룸          // 기둥은 가장 앞이라 안개가 거의 끼지 않는다 → 가장 검다
+  drawPipeBloom(camX);                    // 장애물 발광부 블룸
+  drawJets(camX);          // 기둥은 가장 앞이라 안개가 거의 끼지 않는다 → 가장 검다
   drawLocalPipeReflections(camX);         // P3.4 neighboring solid surfaces, shadow-tested
   drawHeroRays(env.light, camX, hy, hr, sx);
   drawGround(sx, env.tintCol, env.tintA);
@@ -3902,6 +4176,7 @@ function render(alpha) {
     ctx.globalAlpha = 1;
   }
 
+  hazardArt = userArt;
   drawHudStripBg();
   ctx.setTransform(S, 0, 0, S, 0, WYd);
   drawUI();
